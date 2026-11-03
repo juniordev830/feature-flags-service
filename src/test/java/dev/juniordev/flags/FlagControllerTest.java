@@ -54,6 +54,23 @@ class FlagControllerTest {
     }
 
     @Test
+    void bulkUpdatesValidateBeforeChangingAnyFlag() throws Exception {
+        mvc.perform(post("/api/flags/bulk").header("X-Admin-Token", TOKEN)
+                .contentType("application/json")
+                .content("{\"bulk.one\":true,\"bulk.two\":false}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$['bulk.one']").value(true))
+            .andExpect(jsonPath("$['bulk.two']").value(false));
+
+        mvc.perform(post("/api/flags/bulk").header("X-Admin-Token", TOKEN)
+                .contentType("application/json")
+                .content("{\"bulk.three\":true,\"INVALID\":true}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/flags/bulk.three"))
+            .andExpect(jsonPath("$.enabled").value(false));
+    }
+
+    @Test
     void deletingFlagRequiresAdminAndResetsItToDisabled() throws Exception {
         mvc.perform(put("/api/flags/reset.demo").header("X-Admin-Token", TOKEN)
                 .contentType("application/json").content("{\"enabled\":true}"))
