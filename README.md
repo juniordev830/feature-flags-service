@@ -23,6 +23,9 @@ Por padrão, o serviço escuta somente em `127.0.0.1:8080`.
 | GET | `/api/flags` | `X-Admin-Token` | Lista somente flags explicitamente configuradas, ordenadas por nome. |
 | PUT | `/api/flags/{nome}` | `X-Admin-Token` | Define `{"enabled": true/false}`. |
 | DELETE | `/api/flags/{nome}` | `X-Admin-Token` | Remove a configuração; a flag volta ao padrão `false`. Retorna HTTP 204. |
+| PUT | `/api/flags/{nome}/rollout` | `X-Admin-Token` | Define `{"percentage": 0..100}` para uma flag já criada. |
+| GET | `/api/flags/{nome}/rollout` | `X-Admin-Token` | Lê o percentual configurado (padrão 100). |
+| GET | `/api/flags/{nome}/evaluate?subject=...` | Não | Avalia se a flag está habilitada para um identificador estável de sujeito (1 a 256 caracteres). |
 
 As rotas administrativas exigem token de pelo menos 32 caracteres, definido em `FEATURE_FLAGS_ADMIN_TOKEN`. Sem configuração válida, retornam HTTP 503; token ausente ou incorreto retorna HTTP 401.
 
@@ -39,6 +42,21 @@ curl -i -X DELETE http://127.0.0.1:8080/api/flags/minha.flag \
   -H "X-Admin-Token: $FEATURE_FLAGS_ADMIN_TOKEN"
 ```
 
+## Rollout gradual e determinístico
+
+Depois de criar a flag com `PUT /api/flags/{nome}`, configure uma liberação parcial:
+
+```bash
+curl -s -X PUT http://127.0.0.1:8080/api/flags/minha.flag/rollout \\
+  -H "X-Admin-Token: $FEATURE_FLAGS_ADMIN_TOKEN" \\
+  -H "Content-Type: application/json" -d '{"percentage":25}'
+curl -s 'http://127.0.0.1:8080/api/flags/minha.flag/evaluate?subject=cliente-123'
+```
+
+O mesmo par `nome + subject` sempre cai no mesmo grupo por hash SHA-256. `percentage: 0` desliga o acesso de todos; `100` inclui todos **se** a flag estiver ligada. O booleano principal é um *kill switch*: quando `enabled: false`, a avaliação sempre é falsa. `GET /api/flags/{nome}` continua retornando apenas esse booleano principal, sem calcular o percentual. Os métodos `PUT` e `POST /bulk` preservam um percentual já configurado. `DELETE` descarta também o percentual da flag.
+
+Este algoritmo é para distribuição gradual de funcionalidades, **não** para autenticação, autorização, dados sensíveis ou autorização de pagamentos. O campo `subject` deve ser um identificador pseudônimo e estável, não CPF, e-mail ou outro dado pessoal. A leitura da avaliação não registra identificadores e o serviço permanece restrito a `localhost`.
+
 ## Testes
 
 ```bash
@@ -53,7 +71,7 @@ O token administrativo não deve ser versionado nem colocado em logs. Apesar de 
 
 ## Evolução planejada
 
-Adicionar banco de dados, histórico de auditoria, rollout por porcentagem, clientes SDK e autenticação por usuário.
+Adicionar banco de dados, histórico de auditoria, clientes SDK e autenticação por usuário.
 
 ---
 
