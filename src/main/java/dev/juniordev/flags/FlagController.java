@@ -15,7 +15,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/flags")
 public class FlagController {
     private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9._-]{0,63}");
-    private final ConcurrentHashMap<String, Boolean> flags = new ConcurrentHashMap<>();
+    private record Configuration(boolean enabled, int rolloutPercentage) {}
+    private final ConcurrentHashMap<String, Configuration> flags = new ConcurrentHashMap<>();
     @Value("${feature.flags.admin-token:}") private String adminToken;
 
     private void validateName(String name) {
@@ -34,18 +35,23 @@ public class FlagController {
 
     public record FlagValue(String name, boolean enabled) {}
     public record UpdateFlag(Boolean enabled) {}
+    public record UpdateRollout(Integer percentage) {}
+    public record RolloutValue(String name, int percentage) {}
 
     @GetMapping("/{name}")
     public FlagValue read(@PathVariable String name) {
         validateName(name);
-        return new FlagValue(name, flags.getOrDefault(name, false));
+        Configuration config = flags.get(name);
+        return new FlagValue(name, config != null && config.enabled());
     }
 
     /** Only explicitly configured flags are listed; unknown flags default to false. */
     @GetMapping
     public Map<String, Boolean> list(@RequestHeader(value = "X-Admin-Token", required = false) String supplied) {
         requireAdminToken(supplied);
-        return new TreeMap<>(flags);
+        var listed = new TreeMap<String, Boolean>();
+        flags.forEach((name, config) -> listed.put(name, config.enabled()));
+        return listed;
     }
 
     /**
@@ -65,7 +71,8 @@ public class FlagController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid bulk flag update");
             validated.put(name, enabled);
         });
-        flags.putAll(validated);
+        validated.forEach((name, enabled) -> flags.compute(name,
+                (key, existing) -> new Configuration(enabled, existing == null ? 100 : existing.rolloutPercentage())));
         return validated;
     }
 
@@ -77,8 +84,54 @@ public class FlagController {
         requireAdminToken(supplied);
         if (update == null || update.enabled() == null)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "enabled required");
-        flags.put(name, update.enabled());
+        flags.compute(name, (key, existing) -> new Configuration(
+                update.enabled(), existing == null ? 100 : existing.rolloutPercentage()));
         return new FlagValue(name, update.enabled());
+    }
+
+    /**
+     * Evaluates a percentage rollout consistently for the same flag/subject pair.
+     * Rollouts are release controls, NOT authentication or authorization.
+     */
+    @GetMapping("/{name}/evaluate")
+    public FlagValue evaluate(@PathVariable String name, @RequestParam String subject) {
+        validateName(name);
+        if (subject.isBlank() || subject.length() > 256)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "subject must contain 1..256 characters");
+        Configuration config = flags.get(name);
+        boolean enabled = config != null && config.enabled() &&
+                RolloutPolicy.includes(name, subject, config.rolloutPercentage());
+        return new FlagValue(name, enabled);
+    }
+
+    @GetMapping("/{name}/rollout")
+    public RolloutValue readRollout(
+            @PathVariable String name,
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied) {
+        validateName(name);
+        requireAdminToken(supplied);
+        Configuration config = flags.get(name);
+        if (config == null)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag is not configured");
+        return new RolloutValue(name, config.rolloutPercentage());
+    }
+
+    /** A rollout is configured only after the flag has been explicitly created. */
+    @PutMapping("/{name}/rollout")
+    public RolloutValue updateRollout(
+            @PathVariable String name,
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
+            @RequestBody UpdateRollout update) {
+        validateName(name);
+        requireAdminToken(supplied);
+        if (update == null || update.percentage() == null ||
+                update.percentage() < 0 || update.percentage() > 100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "percentage must be 0..100");
+        Configuration config = flags.computeIfPresent(name,
+                (key, existing) -> new Configuration(existing.enabled(), update.percentage()));
+        if (config == null)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag is not configured");
+        return new RolloutValue(name, config.rolloutPercentage());
     }
 
     /** Removing a flag restores its default disabled state. */
