@@ -48,6 +48,27 @@ public class FlagController {
         return new TreeMap<>(flags);
     }
 
+    /**
+     * Applies a validated batch so a deployment can update several flags in one request.
+     * Validation runs before the map is changed, preventing partial writes.
+     */
+    @PostMapping("/bulk")
+    public Map<String, Boolean> bulkUpdate(
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
+            @RequestBody Map<String, Boolean> updates) {
+        requireAdminToken(supplied);
+        if (updates == null || updates.isEmpty())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one flag is required");
+        var validated = new TreeMap<String, Boolean>();
+        updates.forEach((name, enabled) -> {
+            if (name == null || !NAME.matcher(name).matches() || enabled == null)
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid bulk flag update");
+            validated.put(name, enabled);
+        });
+        flags.putAll(validated);
+        return validated;
+    }
+
     @PutMapping("/{name}")
     public FlagValue update(@PathVariable String name,
                             @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
