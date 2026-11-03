@@ -13,7 +13,7 @@ final class RolloutPolicy {
         if (percentage >= 100) return true;
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest((flagName + "\u0000" + subject).getBytes(StandardCharsets.UTF_8));
+                    .digest((flagName + "|" + subject).getBytes(StandardCharsets.UTF_8));
             long value = 0;
             for (int index = 0; index < 4; index++) {
                 value = (value << 8) | (digest[index] & 0xffL);
