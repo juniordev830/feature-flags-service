@@ -186,7 +186,8 @@ class FlagAuditLogTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     void concurrentWritersProduceUniqueOrderedIds() throws Exception {
         var log = journal();
-        try (var executor = Executors.newFixedThreadPool(6)) {
+        var executor = Executors.newFixedThreadPool(6);
+        try {
             var tasks = new ArrayList<Callable<Long>>();
             for (int i = 0; i < 150; i++) {
                 final int index = i;
@@ -198,6 +199,8 @@ class FlagAuditLogTest {
             assertEquals(150, log.size());
             assertEquals(1, log.page(0, 1).events().get(0).id());
             assertEquals(150, log.page(149, 1).events().get(0).id());
+        } finally {
+            executor.shutdownNow();
         }
     }
 }
