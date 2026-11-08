@@ -17,6 +17,7 @@ public class FlagController {
     private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9._-]{0,63}");
     private record Configuration(boolean enabled, int rolloutPercentage) {}
     private final ConcurrentHashMap<String, Configuration> flags = new ConcurrentHashMap<>();
+    private final FlagAuditLog audit = new FlagAuditLog();
     @Value("${feature.flags.admin-token:}") private String adminToken;
 
     private void validateName(String name) {
@@ -73,6 +74,7 @@ public class FlagController {
         });
         validated.forEach((name, enabled) -> flags.compute(name,
                 (key, existing) -> new Configuration(enabled, existing == null ? 100 : existing.rolloutPercentage())));
+        audit.record("bulk-update", validated.keySet());
         return validated;
     }
 
@@ -86,6 +88,7 @@ public class FlagController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "enabled required");
         flags.compute(name, (key, existing) -> new Configuration(
                 update.enabled(), existing == null ? 100 : existing.rolloutPercentage()));
+        audit.record("update", java.util.List.of(name));
         return new FlagValue(name, update.enabled());
     }
 
@@ -203,6 +206,7 @@ public class FlagController {
                 (key, existing) -> new Configuration(existing.enabled(), update.percentage()));
         if (config == null)
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag is not configured");
+        audit.record("rollout-update", java.util.List.of(name));
         return new RolloutValue(name, config.rolloutPercentage());
     }
 
@@ -272,7 +276,32 @@ public class FlagController {
         requireAdminToken(supplied);
         var validated = validateSnapshot(request);
         flags.putAll(validated);
+        audit.record("snapshot-import", validated.keySet());
         return new SnapshotImportResult(1, validated.size(), java.util.List.copyOf(validated.keySet()));
+    }
+
+    /**
+     * Administrative audit history is cursor-paginated and bounded in memory.
+     * No request body, token or evaluation subject is retained in the journal.
+     */
+    @GetMapping("/audit")
+    public FlagAuditLog.Page auditPage(
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
+            @RequestParam(defaultValue = "0") long after,
+            @RequestParam(defaultValue = "50") int limit) {
+        requireAdminToken(supplied);
+        if (after < 0 || limit < 1 || limit > FlagAuditLog.MAX_PAGE_SIZE)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid audit pagination");
+        return audit.page(after, limit);
+    }
+
+    @GetMapping("/audit/{id}")
+    public FlagAuditLog.Event auditEvent(
+            @PathVariable long id,
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied) {
+        requireAdminToken(supplied);
+        return audit.find(id).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "Audit event not found"));
     }
 
     /** Removing a flag restores its default disabled state. */
@@ -282,6 +311,7 @@ public class FlagController {
                        @RequestHeader(value = "X-Admin-Token", required = false) String supplied) {
         validateName(name);
         requireAdminToken(supplied);
-        flags.remove(name);
+        if (flags.remove(name) != null)
+            audit.record("delete", java.util.List.of(name));
     }
 }
