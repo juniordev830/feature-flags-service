@@ -116,3 +116,26 @@ Não use feature flags para decisões de autorização ou controle de acesso.
 O endpoint `POST /api/flags/bulk` aceita de 1 a 100 alterações por requisição,
 para limitar a carga acidental.
 
+
+## Avaliação de coortes em matriz
+
+`POST /api/flags/evaluate/matrix` avalia várias flags para vários
+identificadores de sujeitos numa única chamada, sem revelar o inventário
+completo de configurações. Não requer token administrativo, assim como a
+avaliação pública individual.
+
+```json
+{
+  "subjects": ["customer-1", "customer-2"],
+  "names": ["checkout.v2", "search.experiment"]
+}
+```
+
+A resposta é um objeto com os identificadores dos sujeitos como chaves,
+cada um contendo o mapa de flags solicitadas e decisões booleanas.
+Flags desconhecidas retornam `false`. Os resultados são determinísticos
+para o mesmo par de flag/sujeito e configuração.
+
+A API rejeita sujeitos ou nomes repetidos, identificadores vazios e nomes
+inválidos. Limites: 50 sujeitos, 100 flags e 1.000 decisões por requisição.
+Não envie dados pessoais ou segredos como identificadores de sujeitos.
