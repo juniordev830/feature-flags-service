@@ -23,14 +23,14 @@ public final class FlagAuditLog {
 
     public record Event(long id, Instant occurredAt, String operation,
                  int affected, List<String> sampleNames) {
-        Event {
+        public Event {
             sampleNames = List.copyOf(sampleNames);
         }
     }
 
     public record Page(List<Event> events, long nextAfter, boolean hasMore,
                 long oldestAvailable) {
-        Page {
+        public Page {
             events = List.copyOf(events);
         }
     }
