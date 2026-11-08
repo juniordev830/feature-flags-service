@@ -132,6 +132,50 @@ public class FlagController {
         return result;
     }
 
+
+    /**
+     * Bounded matrix evaluation supports comparing rollout decisions across
+     * a cohort of subjects without exposing the complete flag inventory.
+     * Both dimensions are validated before any result is calculated.
+     */
+    public record MatrixEvaluationRequest(
+            java.util.List<String> subjects, java.util.List<String> names) {}
+
+    @PostMapping("/evaluate/matrix")
+    public Map<String, Map<String, Boolean>> evaluateMatrix(
+            @RequestBody MatrixEvaluationRequest request) {
+        if (request == null || request.subjects() == null || request.names() == null ||
+                request.subjects().isEmpty() || request.names().isEmpty() ||
+                request.subjects().size() > 50 || request.names().size() > 100 ||
+                (long) request.subjects().size() * request.names().size() > 1_000)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Provide 1..50 subjects, 1..100 flags, max 1000 evaluations");
+        var subjects = new java.util.TreeSet<String>();
+        for (String subject : request.subjects()) {
+            if (subject == null || subject.isBlank() || subject.length() > 256 ||
+                    !subjects.add(subject))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid or duplicate subject");
+        }
+        var names = new java.util.TreeSet<String>();
+        for (String name : request.names()) {
+            if (name == null || !NAME.matcher(name).matches() || !names.add(name))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid or duplicate flag name");
+        }
+        var result = new TreeMap<String, Map<String, Boolean>>();
+        for (String subject : subjects) {
+            var decisions = new TreeMap<String, Boolean>();
+            for (String name : names) {
+                Configuration config = flags.get(name);
+                decisions.put(name, config != null && config.enabled() &&
+                        RolloutPolicy.includes(name, subject, config.rolloutPercentage()));
+            }
+            result.put(subject, decisions);
+        }
+        return result;
+    }
+
     @GetMapping("/{name}/rollout")
     public RolloutValue readRollout(
             @PathVariable String name,
