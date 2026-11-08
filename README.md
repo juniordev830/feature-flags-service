@@ -139,3 +139,41 @@ para o mesmo par de flag/sujeito e configuração.
 A API rejeita sujeitos ou nomes repetidos, identificadores vazios e nomes
 inválidos. Limites: 50 sujeitos, 100 flags e 1.000 decisões por requisição.
 Não envie dados pessoais ou segredos como identificadores de sujeitos.
+
+
+## Histórico administrativo de alterações
+
+O serviço mantém um **histórico de auditoria volátil**, em memória, das
+alterações administrativas bem-sucedidas. As operações registradas são
+`update`, `delete`, `bulk-update`, `rollout-update` e
+`snapshot-import`. Leituras, avaliações públicas, validações prévias
+e requisições rejeitadas não geram eventos.
+
+| Método | Rota | Autenticação | Descrição |
+| --- | --- | --- | --- |
+| GET | `/api/flags/audit?after=0&limit=50` | `X-Admin-Token` | Consulta eventos por cursor crescente. |
+| GET | `/api/flags/audit/{id}` | `X-Admin-Token` | Consulta um evento retido pelo identificador. |
+
+Exemplo de consulta:
+
+```bash
+curl -s 'http://127.0.0.1:8080/api/flags/audit?after=0&limit=20' \
+  -H "X-Admin-Token: $FEATURE_FLAGS_ADMIN_TOKEN"
+```
+
+Cada evento contém `id`, `occurredAt` (UTC), `operation`,
+`affected` (número de flags distintas) e `sampleNames` (até 12 nomes,
+ordenados). A página retorna `events`, `nextAfter`, `hasMore` e
+`oldestAvailable`. Para continuar a leitura, envie `nextAfter` como
+`after`. O parâmetro `limit` aceita de 1 a 100; `after` deve ser
+um inteiro não negativo. O campo `oldestAvailable` permite detectar
+lacunas quando eventos antigos já foram descartados.
+
+**Privacidade e limites:** o histórico nunca armazena token administrativo,
+identificador de sujeito, percentual, payload ou valor da flag. Os nomes
+das flags são visíveis somente ao administrador e não devem conter dados
+pessoais. Apenas os **256 eventos mais recentes** são mantidos; reiniciar
+o processo apaga todo o histórico. Alterações concorrentes não oferecem
+ordenação transacional entre a atualização das flags e a gravação do evento.
+Esse recurso auxilia a depuração, **não substitui** trilha de auditoria
+persistente e imutável exigida em ambientes regulados.
