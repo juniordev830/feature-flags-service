@@ -16,19 +16,19 @@ import java.util.TreeSet;
  * Tokens, subjects, request bodies and other personal information are never logged.
  * This journal is volatile and is not a substitute for durable compliance auditing.
  */
-final class FlagAuditLog {
+public final class FlagAuditLog {
     static final int CAPACITY = 256;
     static final int SAMPLE_LIMIT = 12;
     static final int MAX_PAGE_SIZE = 100;
 
-    record Event(long id, Instant occurredAt, String operation,
+    public record Event(long id, Instant occurredAt, String operation,
                  int affected, List<String> sampleNames) {
         Event {
             sampleNames = List.copyOf(sampleNames);
         }
     }
 
-    record Page(List<Event> events, long nextAfter, boolean hasMore,
+    public record Page(List<Event> events, long nextAfter, boolean hasMore,
                 long oldestAvailable) {
         Page {
             events = List.copyOf(events);
