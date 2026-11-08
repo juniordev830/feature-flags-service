@@ -63,8 +63,8 @@ public class FlagController {
             @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
             @RequestBody Map<String, Boolean> updates) {
         requireAdminToken(supplied);
-        if (updates == null || updates.isEmpty())
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one flag is required");
+        if (updates == null || updates.isEmpty() || updates.size() > 100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provide 1..100 flags");
         var validated = new TreeMap<String, Boolean>();
         updates.forEach((name, enabled) -> {
             if (name == null || !NAME.matcher(name).matches() || enabled == null)
@@ -160,6 +160,75 @@ public class FlagController {
         if (config == null)
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag is not configured");
         return new RolloutValue(name, config.rolloutPercentage());
+    }
+
+
+    /**
+     * Versioned snapshots support backups and controlled promotion between environments.
+     * The export includes only explicitly configured flags and requires admin access.
+     * Import is a merge: flags not present in the snapshot remain unchanged.
+     */
+    public record SnapshotFlag(Boolean enabled, Integer rolloutPercentage) {}
+    public record SnapshotImportRequest(Integer version, Map<String, SnapshotFlag> flags) {}
+    public record SnapshotExport(int version, Map<String, SnapshotFlag> flags) {}
+    public record SnapshotImportResult(int version, int imported, java.util.List<String> names) {}
+
+    @GetMapping("/snapshot")
+    public SnapshotExport exportSnapshot(
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied) {
+        requireAdminToken(supplied);
+        var result = new TreeMap<String, SnapshotFlag>();
+        flags.forEach((name, config) ->
+                result.put(name, new SnapshotFlag(config.enabled(), config.rolloutPercentage())));
+        return new SnapshotExport(1, result);
+    }
+
+    /**
+     * Validate the complete snapshot before modifying any configuration.
+     * A maximum of 500 flags prevents accidental unbounded administrative imports.
+     */
+    private TreeMap<String, Configuration> validateSnapshot(SnapshotImportRequest request) {
+        if (request == null || request.version() == null || request.version() != 1)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported snapshot version");
+        if (request.flags() == null || request.flags().isEmpty() || request.flags().size() > 500)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provide 1..500 snapshot flags");
+        var validated = new TreeMap<String, Configuration>();
+        request.flags().forEach((name, value) -> {
+            if (name == null || !NAME.matcher(name).matches() ||
+                    value == null || value.enabled() == null ||
+                    value.rolloutPercentage() == null ||
+                    value.rolloutPercentage() < 0 || value.rolloutPercentage() > 100)
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid snapshot flag");
+            validated.put(name, new Configuration(value.enabled(), value.rolloutPercentage()));
+        });
+        return validated;
+    }
+
+    /**
+     * Dry-run an import using exactly the same validation as the real import.
+     * The response lists the names that would be updated, without changing state.
+     */
+    @PostMapping("/snapshot/validate")
+    public SnapshotImportResult previewSnapshot(
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
+            @RequestBody SnapshotImportRequest request) {
+        requireAdminToken(supplied);
+        var validated = validateSnapshot(request);
+        return new SnapshotImportResult(1, validated.size(), java.util.List.copyOf(validated.keySet()));
+    }
+
+    /**
+     * Merge a validated snapshot. Validation is all-or-nothing, but simultaneous
+     * administrative writes are not transactionally isolated across multiple flags.
+     */
+    @PostMapping("/snapshot/import")
+    public SnapshotImportResult importSnapshot(
+            @RequestHeader(value = "X-Admin-Token", required = false) String supplied,
+            @RequestBody SnapshotImportRequest request) {
+        requireAdminToken(supplied);
+        var validated = validateSnapshot(request);
+        flags.putAll(validated);
+        return new SnapshotImportResult(1, validated.size(), java.util.List.copyOf(validated.keySet()));
     }
 
     /** Removing a flag restores its default disabled state. */
