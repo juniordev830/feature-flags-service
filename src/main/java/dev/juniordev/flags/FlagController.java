@@ -104,6 +104,34 @@ public class FlagController {
         return new FlagValue(name, enabled);
     }
 
+    /**
+     * Evaluate a single subject against multiple flags in one network request.
+     * No configured-flag inventory is exposed: only requested names are returned.
+     * Invalid requests are rejected before evaluating any flag.
+     */
+    public record BatchEvaluationRequest(String subject, java.util.List<String> names) {}
+
+    @PostMapping("/evaluate")
+    public Map<String, Boolean> evaluateBatch(@RequestBody BatchEvaluationRequest request) {
+        if (request == null || request.subject() == null ||
+                request.subject().isBlank() || request.subject().length() > 256)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "subject must contain 1..256 characters");
+        if (request.names() == null || request.names().isEmpty() || request.names().size() > 100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provide 1..100 flag names");
+        var names = new java.util.TreeSet<String>();
+        for (String name : request.names()) {
+            if (name == null || !NAME.matcher(name).matches() || !names.add(name))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or duplicate flag name");
+        }
+        var result = new TreeMap<String, Boolean>();
+        for (String name : names) {
+            Configuration config = flags.get(name);
+            result.put(name, config != null && config.enabled() &&
+                    RolloutPolicy.includes(name, request.subject(), config.rolloutPercentage()));
+        }
+        return result;
+    }
+
     @GetMapping("/{name}/rollout")
     public RolloutValue readRollout(
             @PathVariable String name,
