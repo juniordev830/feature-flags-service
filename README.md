@@ -76,3 +76,43 @@ Adicionar banco de dados, histórico de auditoria, clientes SDK e autenticação
 ---
 
 Projeto de Engenharia de Software mantido na conta [juniordev830](https://github.com/juniordev830).
+
+
+## Backup e promoção de configurações
+
+O serviço oferece snapshots versionados (versão 1) para transportar configurações
+entre ambientes, mantendo o controle de acesso administrativo.
+
+| Método | Rota | Comportamento |
+| --- | --- | --- |
+| GET | `/api/flags/snapshot` | Exporta as flags explicitamente configuradas, incluindo `enabled` e `rolloutPercentage`. |
+| POST | `/api/flags/snapshot/validate` | Valida o snapshot e lista as flags que seriam atualizadas, sem gravar. |
+| POST | `/api/flags/snapshot/import` | Mescla as configurações validadas com as existentes. Não remove flags omitidas. |
+
+Todas as três rotas exigem `X-Admin-Token`. O formato é:
+
+```json
+{
+  "version": 1,
+  "flags": {
+    "checkout.v2": {"enabled": true, "rolloutPercentage": 25},
+    "search.experiment": {"enabled": false, "rolloutPercentage": 100}
+  }
+}
+```
+
+Fluxo recomendado: exporte a configuração de origem, revise o arquivo,
+envie-o primeiro para `/snapshot/validate` e somente depois para
+`/snapshot/import`. Um snapshot inválido é recusado integralmente,
+sem modificar flags. A importação aceita entre 1 e 500 flags; nomes
+devem obedecer ao padrão da API, e percentuais precisam estar entre 0 e 100.
+
+**Importante:** a importação é um *merge*, não uma restauração destrutiva.
+Ela valida todos os itens antes de escrever, mas alterações administrativas
+simultâneas não possuem isolamento transacional entre flags. A exportação
+reflete uma leitura do estado em memória, que é volátil e reinicia com o processo.
+Não use feature flags para decisões de autorização ou controle de acesso.
+
+O endpoint `POST /api/flags/bulk` aceita de 1 a 100 alterações por requisição,
+para limitar a carga acidental.
+
