@@ -58,3 +58,7 @@ Adicionar banco de dados, histórico de auditoria, rollout por porcentagem, clie
 ---
 
 Projeto de Engenharia de Software mantido na conta [juniordev830](https://github.com/juniordev830).
+
+## Guia para contribuir
+
+Veja o [roteiro de testes e manutenção](docs/GUIA_DE_VALIDACAO.md) para validar mudanças com comandos e cenários específicos deste projeto.
